@@ -110,6 +110,10 @@ NESTED_PROMPT = """
 Ты определяешь только nested для переданных размерных отрезков. Не определяй main/branch,
 не используй топологию узлов и не меняй роль по длине трубы.
 
+Каждый переданный C-ID уже является действительным красным линейным размером и обязан быть
+возвращён в ответе. Запрещено пропускать C-ID, назначать ему role=irrelevant или исключать
+его по любой причине, кроме доказанной вложенности.
+
 Алгоритм:
 1. Сначала включи каждый переданный C-ID.
 2. Используй геометрию красных размерных отрезков и поле dimension_line. Число value_mm
@@ -395,6 +399,12 @@ def merge_nested_result(
             item.role = "nested"
             item.included = False
             item.reason = nested_reasons.get(item.candidate_id) or "Nested dimension excluded by the independent geometry pass."
+        elif item.role == "irrelevant":
+            # Geometry preprocessing already removed service numbers; a remaining
+            # candidate may only be excluded by the independent nested pass.
+            item.role = "main"
+            item.included = True
+            item.reason = "Valid geometry candidate; retained because irrelevant is not allowed."
     topology.status = "review" if nested.status == "review" else topology.status
     topology.ambiguities.extend(
         message for message in nested.ambiguities
