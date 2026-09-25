@@ -122,6 +122,12 @@ class App(tk.Tk):
             out = ROOT / self.output_var.get()
             data = json.loads((out / "results.json").read_text(encoding="utf-8"))
             item = next(x for x in data if x.get("page_number") == start)
+            metrics_path = out / "metrics.json"
+            request_cost = None
+            if metrics_path.exists():
+                metrics_data = json.loads(metrics_path.read_text(encoding="utf-8"))
+                if metrics_data:
+                    request_cost = metrics_data[0].get("cost_rub")
             annotated = out / "annotated.pdf"
             dimensions = item.get("interpretation", {}).get("dimensions", [])
             main = [d for d in dimensions if d.get("included") and d.get("role") == "main"]
@@ -140,6 +146,8 @@ class App(tk.Tk):
             self.result_text.insert("end", "Суммарная размерная длина\n", "title")
             self.result_text.insert("end", f"{total} мм = {total / 1000:.3f} м\n", "total")
             self.result_text.insert("end", f"Основная трасса {main_sum} мм + ветви {branch_sum} мм\n\n")
+            if isinstance(request_cost, (int, float)):
+                self.result_text.insert("end", f"Стоимость запросов: {request_cost:.4f} ₽\n\n")
             self.result_text.insert("end", "Метка       Участок                 Размер мм\n", "heading")
             self.result_text.insert("end", "─" * 48 + "\n")
             for d in dimensions:

@@ -548,6 +548,12 @@ def attach_cost(
 ) -> None:
     input_rate = optional_float(f"{prefix}_INPUT_RUB_PER_KTOK")
     output_rate = optional_float(f"{prefix}_OUTPUT_RUB_PER_KTOK")
+    model_name = str(metrics.get("model") or "").lower()
+    if input_rate is None or output_rate is None:
+        if "gemini-3-flash" in model_name:
+            input_rate, output_rate = 0.15, 0.90
+        elif "gemini-2.5-flash" in model_name:
+            input_rate, output_rate = 0.09, 0.75
     input_tokens = metrics.get("input_tokens")
     output_tokens = metrics.get("output_tokens")
 
@@ -563,7 +569,7 @@ def attach_cost(
         + output_tokens / 1000 * output_rate,
         6,
     )
-    metrics["cost_basis"] = "VseGPT RUB per 1000 usage tokens"
+    metrics["cost_basis"] = "VseGPT RUB per 1000 usage tokens (model default rate if not configured)"
 
 
 def analyze(
@@ -662,6 +668,7 @@ def analyze(
                 client, nested_model, page_number, png, marked_png, candidates,
                 system_prompt=NESTED_PROMPT,
             )
+            attach_cost(nested_metrics, prefix="VSEGPT_NESTED")
             result = merge_nested_result(result, nested_result, candidates)
         leader_ids = {
             item.get("candidate_id")
