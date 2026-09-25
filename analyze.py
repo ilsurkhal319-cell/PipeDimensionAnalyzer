@@ -134,6 +134,21 @@ nested. Если границы нельзя уверенно сопостави
 непротиворечивый вариант. Верни только структурированный объект без Markdown.
 """.strip()
 
+NESTED_PROMPT = """
+Ты определяешь только вложенность размерных отрезков на размеченном чертеже.
+Не определяй main/branch и не меняй роль размера по топологии труб.
+
+Сначала включи все переданные размеры. Пометь размер nested только если другой размер
+относится к тому же физическому участку осевой трассы и полностью покрывает его границы.
+Одна общая конечная точка, параллельность, близость, меньшее число или визуальное
+пересечение не доказывают вложенность. Если границы нельзя уверенно сопоставить по
+геометрии, оставь оба размера включёнными.
+
+Для nested укажи в reason покрывающий C-ID. Верни все C-ID ровно один раз, сохрани их
+значения и bbox, а роль у вложенных размеров укажи nested, у остальных — main.
+Верни только структурированный объект без Markdown.
+""".strip()
+
 
 
 
@@ -284,6 +299,7 @@ def interpret_page(
     original_png: bytes,
     marked_png: bytes,
     candidates: list[dict[str, object]],
+    system_prompt: str = SYSTEM_PROMPT,
 ) -> tuple[PageInterpretation, dict[str, int | float | str | None]]:
     started = time.perf_counter()
     response = client.chat.completions.parse(
@@ -291,7 +307,7 @@ def interpret_page(
         messages=[
             {
                 "role": "system",
-                "content": SYSTEM_PROMPT,
+                "content": system_prompt,
             },
             {
                 "role": "user",
@@ -337,6 +353,35 @@ def interpret_page(
         "total_tokens": getattr(usage, "total_tokens", None),
     }
     return result, metrics
+
+
+def merge_nested_result(
+    topology: PageInterpretation,
+    nested: PageInterpretation,
+    candidates: list[dict[str, object]],
+) -> PageInterpretation:
+    """Apply only nested decisions; keep main/branch from the topology pass."""
+    nested_ids = {
+        item.candidate_id
+        for item in nested.dimensions
+        if item.role == "nested"
+    }
+    nested_reasons = {
+        item.candidate_id: item.reason
+        for item in nested.dimensions
+        if item.role == "nested"
+    }
+    for item in topology.dimensions:
+        if item.candidate_id in nested_ids:
+            item.role = "nested"
+            item.included = False
+            item.reason = nested_reasons.get(item.candidate_id) or "Nested dimension excluded by the independent geometry pass."
+    topology.status = "review" if nested.status == "review" else topology.status
+    topology.ambiguities.extend(
+        message for message in nested.ambiguities
+        if message not in topology.ambiguities
+    )
+    return assign_display_labels(validate_dimensions(topology, candidates))
 
 
 def review_page(
@@ -530,6 +575,7 @@ def analyze(
     review_model: str | None = None,
     start_page: int = 1,
     expected_mm: int | None = None,
+    nested_model: str | None = None,
 ) -> None:
     from openai import OpenAI
 
@@ -609,6 +655,14 @@ def analyze(
         result, proposal_metrics = interpret_page(
             client, model, page_number, png, marked_png, candidates
         )
+        nested_metrics = None
+        if nested_model:
+            print(f"Page {page_number}/{len(pages)}: checking nested dimensions with {nested_model}")
+            nested_result, nested_metrics = interpret_page(
+                client, nested_model, page_number, png, marked_png, candidates,
+                system_prompt=NESTED_PROMPT,
+            )
+            result = merge_nested_result(result, nested_result, candidates)
         leader_ids = {
             item.get("candidate_id")
             for item in geometry_items
@@ -638,6 +692,8 @@ def analyze(
         # be assigned only after all role decisions are complete.
         result = assign_display_labels(result)
         metrics = combine_stage_metrics(proposal_metrics, review_metrics)
+        if nested_metrics is not None:
+            metrics = combine_stage_metrics(metrics, nested_metrics)
 
         total_mm, formula = formula_for(result)
         if expected_mm is not None:
@@ -709,6 +765,11 @@ def parse_args() -> argparse.Namespace:
         default=os.getenv("OPENAI_REVIEW_MODEL"),
         help="Optional second model that verifies and corrects the first answer",
     )
+    parser.add_argument(
+        "--nested-model",
+        default=os.getenv("OPENAI_NESTED_MODEL", "vis-google/gemini-2.5-flash"),
+        help="Separate vision model used only for nested dimensions",
+    )
     return parser.parse_args()
 
 
@@ -723,6 +784,7 @@ def main() -> None:
         args.review_model,
         args.start_page,
         args.expected_mm,
+        args.nested_model,
     )
 
 
