@@ -707,7 +707,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("pdf", type=Path)
     parser.add_argument("--output", type=Path, default=Path("output"))
     parser.add_argument("--model", default=os.getenv("OPENAI_MODEL", "vis-openai/gpt-5-mini"))
-    parser.add_argument("--dpi", type=int, default=200)
+    parser.add_argument("--dpi", type=int, default=150)
     parser.add_argument("--max-pages", type=int, default=None)
     parser.add_argument("--start-page", type=int, default=1)
     parser.add_argument("--expected-mm", type=int, default=None)
