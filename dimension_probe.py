@@ -203,20 +203,51 @@ for drawing in page.get_drawings():
 
 matches.extend(item[1] for item in leader_candidates.values())
 
+def point_distance(a, b):
+    return math.hypot(a[0]-b[0], a[1]-b[1])
+
+def segment_contains(outer, inner):
+    ax, ay = outer[1][0]-outer[0][0], outer[1][1]-outer[0][1]
+    length_sq = ax*ax + ay*ay
+    if not length_sq:
+        return False
+    projections=[]; cross=[]
+    for x,y in inner:
+        projections.append(((x-outer[0][0])*ax + (y-outer[0][1])*ay)/length_sq)
+        cross.append(abs(ax*(y-outer[0][1])-ay*(x-outer[0][0]))/math.sqrt(length_sq))
+    return max(cross) <= 3 and min(projections) >= -.02 and max(projections) <= 1.02
+
+auto_nested={}
+for inner in matches:
+    inner_line=[inner["a"],inner["b"]]
+    inner_len=point_distance(*inner_line)
+    for outer in matches:
+        if inner is outer:
+            continue
+        outer_line=[outer["a"],outer["b"]]
+        if point_distance(*outer_line) > inner_len*1.05 and segment_contains(outer_line,inner_line):
+            auto_nested[inner["candidate_id"]]=outer["candidate_id"]
+            inner["nested"]=True
+            inner["covers"]=outer["candidate_id"]
+            break
+for item in matches:
+    item.setdefault("nested",False)
+
 output_dir=Path("output")/"dimension_probe"
 output_dir.mkdir(parents=True,exist_ok=True)
 out=output_dir/f"dimension_probe_page{PAGE_TAG}.json"
 out.write_text(json.dumps(matches,ensure_ascii=False,indent=2),encoding="utf-8")
 for i,m in enumerate(matches,1):
     a,b=pymupdf.Point(*m["a"]),pymupdf.Point(*m["b"])
-    page.draw_line(a,b,color=(1,0,0),width=1,overlay=True)
+    color=(0.55,0.18,0.72) if m.get("nested") else (1,0,0)
+    page.draw_line(a,b,color=color,width=1.4 if m.get("nested") else 1,overlay=True)
     if m["mode"]=="leader":
         page.draw_line(pymupdf.Point(*m["leader_a"]),pymupdf.Point(*m["leader_b"]),color=(0,0.7,0),width=1,overlay=True)
     source_number=next((n for n in numbers if n["candidate_id"]==m["candidate_id"]),None)
     if source_number is not None:
         box=pymupdf.Rect(source_number["x0"]-2,source_number["y0"]-2,
                          source_number["x1"]+2,source_number["y1"]+2)
-        page.draw_rect(box,color=(1,0,0),width=1,overlay=True)
+        page.draw_rect(box,color=color,width=1.2,overlay=True)
 for service in service_boxes:
     x0,y0,x1,y1=service["bbox"]
     page.draw_rect(pymupdf.Rect(x0-2,y0-2,x1+2,y1+2),color=(0,0.35,1),width=1,overlay=True)
