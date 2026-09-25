@@ -680,6 +680,14 @@ def analyze(
         writer.writeheader()
         writer.writerows(rows)
 
+    # Единый сводный файл по всем обработанным листам. При запуске без
+    # --max-pages он содержит строки для всех 10 листов; при запуске одного
+    # листа — только выбранный лист.
+    with (output_dir / "results_all.csv").open("w", encoding="utf-8-sig", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+
     (output_dir / "results.json").write_text(
         json.dumps(page_payloads, ensure_ascii=False, indent=2),
         encoding="utf-8",
