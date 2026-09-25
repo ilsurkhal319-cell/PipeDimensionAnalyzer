@@ -383,12 +383,28 @@ def merge_nested_result(
                 return True
         return False
 
+    auto_nested: dict[str, str] = {}
+    for inner_id, inner_line in geometry.items():
+        if not inner_line:
+            continue
+        inner = [inner_line["a"], inner_line["b"]]
+        inner_length = point_distance(inner[0], inner[1])
+        for outer_id, outer_line in geometry.items():
+            if inner_id == outer_id or not outer_line:
+                continue
+            outer = [outer_line["a"], outer_line["b"]]
+            outer_length = point_distance(outer[0], outer[1])
+            if outer_length > inner_length * 1.05 and segment_contains(outer, inner):
+                auto_nested[inner_id] = outer_id
+                break
+
     nested_ids = {
         item.candidate_id
         for item in nested.dimensions
         if item.role == "nested"
         and not is_only_adjacent(item.candidate_id)
     }
+    nested_ids.update(auto_nested)
     nested_reasons = {
         item.candidate_id: item.reason
         for item in nested.dimensions
@@ -398,7 +414,11 @@ def merge_nested_result(
         if item.candidate_id in nested_ids:
             item.role = "nested"
             item.included = False
-            item.reason = nested_reasons.get(item.candidate_id) or "Nested dimension excluded by the independent geometry pass."
+            item.reason = (
+                nested_reasons.get(item.candidate_id)
+                or (f"{auto_nested[item.candidate_id]} fully covers this physical interval." if item.candidate_id in auto_nested else None)
+                or "Nested dimension excluded by the independent geometry pass."
+            )
         elif item.role == "irrelevant":
             # Geometry preprocessing already removed service numbers; a remaining
             # candidate may only be excluded by the independent nested pass.
