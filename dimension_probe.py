@@ -218,7 +218,7 @@ def segment_contains(outer, inner):
     # Dimension lines are often drawn parallel to the axis with a lateral
     # offset. Allow that drafting offset while still requiring full projection
     # containment along the outer segment.
-    return max(cross) <= 24 and min(projections) >= -.02 and max(projections) <= 1.02
+    return max(cross) <= 24 and min(projections) >= -.10 and max(projections) <= 1.10
 
 auto_nested={}
 for inner in matches:

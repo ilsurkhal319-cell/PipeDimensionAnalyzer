@@ -367,7 +367,7 @@ def merge_nested_result(
             / max(length_sq ** 0.5, 1.0)
             for point in inner
         ]
-        return max(cross) <= 8 and min(projections) >= -0.02 and max(projections) <= 1.02
+        return max(cross) <= 30 and min(projections) >= -0.10 and max(projections) <= 1.10
 
     def is_only_adjacent(candidate_id: str) -> bool:
         line = geometry.get(candidate_id)
@@ -823,8 +823,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--nested-model",
-        default=os.getenv("OPENAI_NESTED_MODEL", "vis-google/gemini-2.5-flash"),
-        help="Separate vision model used only for nested dimensions",
+        default=None,
+        help="Optional separate vision model used only for nested dimensions",
     )
     return parser.parse_args()
 
