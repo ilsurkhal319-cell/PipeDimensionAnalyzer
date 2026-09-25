@@ -121,7 +121,7 @@ NESTED_PROMPT = """
    A — более короткий внутренний размер.
 5. Если совпадает только одна конечная точка, размеры лишь параллельны, пересекаются
    визуально, находятся рядом или относятся к разным направлениям от узла — это не nested.
-6. Если границы нельзя уверенно сопоставить по геометрии, оставь оба размера включёнными.
+
 
 Для каждого nested укажи в reason покрывающий C-ID. Верни каждый C-ID ровно один раз,
 сохрани исходные value_mm и bbox; у nested role=nested и included=false, у остальных
@@ -340,10 +340,50 @@ def merge_nested_result(
     candidates: list[dict[str, object]],
 ) -> PageInterpretation:
     """Apply only nested decisions; keep main/branch from the topology pass."""
+    geometry = {
+        str(item["candidate_id"]): item.get("dimension_line")
+        for item in candidates
+        if item.get("candidate_id") and item.get("dimension_line")
+    }
+
+    def point_distance(a: list[float], b: list[float]) -> float:
+        return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
+
+    def segment_contains(outer: list[list[float]], inner: list[list[float]]) -> bool:
+        ax, ay = outer[1][0] - outer[0][0], outer[1][1] - outer[0][1]
+        length_sq = ax * ax + ay * ay
+        if length_sq == 0:
+            return False
+        projections = [
+            ((point[0] - outer[0][0]) * ax + (point[1] - outer[0][1]) * ay) / length_sq
+            for point in inner
+        ]
+        cross = [
+            abs(ax * (point[1] - outer[0][1]) - ay * (point[0] - outer[0][0]))
+            / max(length_sq ** 0.5, 1.0)
+            for point in inner
+        ]
+        return max(cross) <= 8 and min(projections) >= -0.02 and max(projections) <= 1.02
+
+    def is_only_adjacent(candidate_id: str) -> bool:
+        line = geometry.get(candidate_id)
+        if not line:
+            return False
+        current = [line["a"], line["b"]]
+        for other_id, other_line in geometry.items():
+            if other_id == candidate_id or not other_line:
+                continue
+            other = [other_line["a"], other_line["b"]]
+            shared = any(point_distance(a, b) <= 8 for a in current for b in other)
+            if shared and not segment_contains(current, other) and not segment_contains(other, current):
+                return True
+        return False
+
     nested_ids = {
         item.candidate_id
         for item in nested.dimensions
         if item.role == "nested"
+        and not is_only_adjacent(item.candidate_id)
     }
     nested_reasons = {
         item.candidate_id: item.reason
