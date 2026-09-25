@@ -215,7 +215,10 @@ def segment_contains(outer, inner):
     for x,y in inner:
         projections.append(((x-outer[0][0])*ax + (y-outer[0][1])*ay)/length_sq)
         cross.append(abs(ax*(y-outer[0][1])-ay*(x-outer[0][0]))/math.sqrt(length_sq))
-    return max(cross) <= 3 and min(projections) >= -.02 and max(projections) <= 1.02
+    # Dimension lines are often drawn parallel to the axis with a lateral
+    # offset. Allow that drafting offset while still requiring full projection
+    # containment along the outer segment.
+    return max(cross) <= 24 and min(projections) >= -.02 and max(projections) <= 1.02
 
 auto_nested={}
 for inner in matches:
