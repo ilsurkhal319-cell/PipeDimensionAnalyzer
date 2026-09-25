@@ -233,6 +233,37 @@ for inner in matches:
             inner["nested"]=True
             inner["covers"]=outer["candidate_id"]
             break
+
+# Fallback for offset drafting: a shorter parallel dimension between the outer
+# dimension and the pipe axis is nested when its projected interval substantially
+# overlaps the outer interval.
+for inner in matches:
+    if inner.get("nested"):
+        continue
+    iline=[inner["a"],inner["b"]]
+    ilen=point_distance(*iline)
+    iangle=math.degrees(math.atan2(iline[1][1]-iline[0][1],iline[1][0]-iline[0][0]))
+    imid=((iline[0][0]+iline[1][0])/2,(iline[0][1]+iline[1][1])/2)
+    idist=min(point_segment_distance(imid[0],imid[1],a,b) for a,b in thick_segments) if thick_segments else 999
+    for outer in matches:
+        if outer is inner or outer.get("nested"):
+            continue
+        oline=[outer["a"],outer["b"]]
+        olen=point_distance(*oline)
+        oangle=math.degrees(math.atan2(oline[1][1]-oline[0][1],oline[1][0]-oline[0][0]))
+        if olen <= ilen*1.05 or diff(iangle,oangle)>4:
+            continue
+        omid=((oline[0][0]+oline[1][0])/2,(oline[0][1]+oline[1][1])/2)
+        odist=min(point_segment_distance(omid[0],omid[1],a,b) for a,b in thick_segments) if thick_segments else -1
+        if not (idist < odist):
+            continue
+        ax,ay=oline[1][0]-oline[0][0],oline[1][1]-oline[0][1]
+        ls=ax*ax+ay*ay
+        proj=[((p[0]-oline[0][0])*ax+(p[1]-oline[0][1])*ay)/ls for p in iline]
+        if min(proj)>=-.15 and max(proj)<=1.15 and max(0,min(proj)) < min(1,max(proj)):
+            inner["nested"]=True
+            inner["covers"]=outer["candidate_id"]
+            break
 for item in matches:
     item.setdefault("nested",False)
 
