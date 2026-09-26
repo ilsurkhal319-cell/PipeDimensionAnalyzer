@@ -25,6 +25,7 @@ class App(tk.Tk):
         self.process_output: list[str] = []
         self.result_image_source: Image.Image | None = None
         self.result_zoom = 1.0
+        self.zoom_var = tk.StringVar(value="100%")
 
         self.pdf_var = tk.StringVar(value=str(ROOT / "02_Изометрии_10_листов.pdf"))
         self.model_var = tk.StringVar(value="vis-google/gemini-3-flash-pre")
@@ -68,7 +69,7 @@ class App(tk.Tk):
         image_toolbar = ttk.Frame(self.result_frame)
         image_toolbar.grid(row=0, column=0, sticky="w", padx=6, pady=(4, 0))
         ttk.Button(image_toolbar, text="−", width=3, command=lambda: self._zoom_image(0.8)).pack(side="left")
-        ttk.Button(image_toolbar, text="100%", command=self._reset_zoom).pack(side="left", padx=4)
+        ttk.Button(image_toolbar, textvariable=self.zoom_var, command=self._reset_zoom).pack(side="left", padx=4)
         ttk.Button(image_toolbar, text="+", width=3, command=lambda: self._zoom_image(1.25)).pack(side="left")
         self.result_image = ttk.Label(self.result_frame, text="После анализа здесь появится разметка")
         self.result_image.grid(row=1, column=0, sticky="nsew", padx=6, pady=6)
@@ -86,16 +87,17 @@ class App(tk.Tk):
         width = max(200, int(image.width * self.result_zoom))
         height = max(150, int(image.height * self.result_zoom))
         image = image.resize((width, height), Image.Resampling.LANCZOS)
-        image.thumbnail((1100, 900))
         self.result_photo = ImageTk.PhotoImage(image)
         self.result_image.configure(image=self.result_photo, text="")
 
     def _zoom_image(self, factor: float) -> None:
         self.result_zoom = max(0.25, min(4.0, self.result_zoom * factor))
+        self.zoom_var.set(f"{round(self.result_zoom * 100)}%")
         self._render_result_image()
 
     def _reset_zoom(self) -> None:
         self.result_zoom = 1.0
+        self.zoom_var.set("100%")
         self._render_result_image()
 
     def _choose_pdf(self) -> None:
@@ -122,12 +124,34 @@ class App(tk.Tk):
             out = ROOT / self.output_var.get()
             data = json.loads((out / "results.json").read_text(encoding="utf-8"))
             item = next(x for x in data if x.get("page_number") == start)
-            metrics_path = out / "metrics.json"
-            request_cost = None
-            if metrics_path.exists():
+            request_cost = 0.0
+            request_duration = 0.0
+            has_cost = False
+            has_duration = False
+            metrics_paths = [
+                out / "metrics.json",
+                ROOT / f"output/page{start}_nested_cache/metrics.json",
+            ]
+            for metrics_path in metrics_paths:
+                if not metrics_path.exists():
+                    continue
                 metrics_data = json.loads(metrics_path.read_text(encoding="utf-8"))
                 if metrics_data:
-                    request_cost = metrics_data[0].get("cost_rub")
+                    metrics = metrics_data[0]
+                    if isinstance(metrics.get("cost_rub"), (int, float)):
+                        request_cost += float(metrics["cost_rub"])
+                        has_cost = True
+                    # Cached nested metrics belong to an earlier run. Show only
+                    # the duration of the branch request executed right now.
+                    if metrics_path == out / "metrics.json" and isinstance(
+                        metrics.get("duration_seconds"), (int, float)
+                    ):
+                        request_duration += float(metrics["duration_seconds"])
+                        has_duration = True
+            if not has_cost:
+                request_cost = None
+            if not has_duration:
+                request_duration = None
             annotated = out / "annotated.pdf"
             dimensions = item.get("interpretation", {}).get("dimensions", [])
             main = [d for d in dimensions if d.get("included") and d.get("role") == "main"]
@@ -148,6 +172,8 @@ class App(tk.Tk):
             self.result_text.insert("end", f"Основная трасса {main_sum} мм + ветви {branch_sum} мм\n\n")
             if isinstance(request_cost, (int, float)):
                 self.result_text.insert("end", f"Стоимость запросов: {request_cost:.4f} ₽\n\n")
+            if isinstance(request_duration, (int, float)):
+                self.result_text.insert("end", f"Время работы моделей: {request_duration:.1f} с\n\n")
             self.result_text.insert("end", "Метка       Участок                 Размер мм\n", "heading")
             self.result_text.insert("end", "─" * 48 + "\n")
             for d in dimensions:
@@ -184,6 +210,7 @@ class App(tk.Tk):
                 image = Image.frombytes("RGB", [pixmap.width, pixmap.height], pixmap.samples)
                 self.result_image_source = image
                 self.result_zoom = 1.0
+                self.zoom_var.set("100%")
                 self._render_result_image()
         except Exception as exc:
             self._write(f"Не удалось показать сводку: {exc}\n")
@@ -204,24 +231,37 @@ class App(tk.Tk):
             messagebox.showerror("Ошибка", "Номер листа и количество должны быть положительными числами")
             return
         self.output_var.set(f"output/page{start}")
-        cmd = [sys.executable, str(ROOT / "analyze.py"), str(pdf),
-               "--output", self.output_var.get(), "--model", self.model_var.get(),
-               "--dpi", "150", "--start-page", str(start), "--max-pages", str(pages)]
-        self._write("$ " + " ".join(cmd) + "\n\n")
+        nested_output = f"output/page{start}_nested_cache"
+        nested_cmd = [sys.executable, str(ROOT / "analyze.py"), str(pdf),
+                      "--output", nested_output, "--model", self.model_var.get(),
+                      "--dpi", "150", "--start-page", str(start), "--max-pages", str(pages),
+                      "--nested-only"]
+        branch_cmd = [sys.executable, str(ROOT / "analyze.py"), str(pdf),
+                      "--output", self.output_var.get(), "--model", self.model_var.get(),
+                      "--dpi", "150", "--start-page", str(start), "--max-pages", str(pages),
+                      "--nested-results", f"{nested_output}/results.json"]
+        # If nested results already exist, reuse them and run only the branch stage.
+        # This avoids spending another request on the unchanged nested analysis.
+        nested_cache_file = ROOT / nested_output / "results.json"
+        commands = [branch_cmd] if nested_cache_file.exists() else [nested_cmd, branch_cmd]
         self.run_button.configure(state="disabled")
         self.progress.start(10)
-        threading.Thread(target=self._worker, args=(cmd,), daemon=True).start()
+        threading.Thread(target=self._worker, args=(commands,), daemon=True).start()
 
-    def _worker(self, cmd: list[str]) -> None:
+    def _worker(self, commands: list[list[str]]) -> None:
         try:
             self.process_output = []
-            self.proc = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE,
-                                         stderr=subprocess.STDOUT, text=True, bufsize=1)
-            assert self.proc.stdout is not None
-            for line in self.proc.stdout:
-                self.process_output.append(line)
-            code = self.proc.wait()
-            self.events.put("__ERROR__" if code else "__DONE__")
+            for cmd in commands:
+                self.proc = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE,
+                                             stderr=subprocess.STDOUT, text=True, bufsize=1)
+                assert self.proc.stdout is not None
+                for line in self.proc.stdout:
+                    self.process_output.append(line)
+                code = self.proc.wait()
+                if code:
+                    self.events.put("__ERROR__")
+                    return
+            self.events.put("__DONE__")
         except Exception as exc:
             self.process_output.append(f"Ошибка запуска: {exc}\n")
             self.events.put("__ERROR__")

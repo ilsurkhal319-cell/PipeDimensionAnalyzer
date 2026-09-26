@@ -1,0 +1,104 @@
+{
+  "pages": 10,
+  "models": [
+    "vis-google/gemini-3-flash-pre"
+  ],
+  "ocr_service": null,
+  "text_extraction": "PyMuPDF embedded text",
+  "ai_calls_total": 22,
+  "ai_calls_per_page": 2.2,
+  "duration_seconds_total": 156.55,
+  "duration_seconds_per_page": 15.655,
+  "cost_rub_total": 26.88465,
+  "cost_rub_per_page": 2.688465,
+  "rates": {
+    "input_rub_per_1000_tokens": 0.15,
+    "output_rub_per_1000_tokens": 0.9
+  },
+  "repeated_calls": [
+    {
+      "page_number": 3,
+      "stage": "branch",
+      "duration_seconds": 8.18,
+      "cost_rub": 1.4778
+    },
+    {
+      "page_number": 4,
+      "stage": "branch",
+      "duration_seconds": 9.065,
+      "cost_rub": 1.60545
+    }
+  ],
+  "pages_detail": [
+    {
+      "page_number": 1,
+      "model": "vis-google/gemini-3-flash-pre",
+      "ai_calls": 2,
+      "duration_seconds": 10.853,
+      "cost_rub": 1.72605
+    },
+    {
+      "page_number": 2,
+      "model": "vis-google/gemini-3-flash-pre",
+      "ai_calls": 2,
+      "duration_seconds": 18.506,
+      "cost_rub": 3.00225
+    },
+    {
+      "page_number": 3,
+      "model": "vis-google/gemini-3-flash-pre",
+      "ai_calls": 2,
+      "duration_seconds": 17.696,
+      "cost_rub": 2.82555
+    },
+    {
+      "page_number": 4,
+      "model": "vis-google/gemini-3-flash-pre",
+      "ai_calls": 2,
+      "duration_seconds": 18.989,
+      "cost_rub": 3.28935
+    },
+    {
+      "page_number": 5,
+      "model": "vis-google/gemini-3-flash-pre",
+      "ai_calls": 2,
+      "duration_seconds": 11.195,
+      "cost_rub": 2.09355
+    },
+    {
+      "page_number": 6,
+      "model": "vis-google/gemini-3-flash-pre",
+      "ai_calls": 2,
+      "duration_seconds": 12.018,
+      "cost_rub": 2.2107
+    },
+    {
+      "page_number": 7,
+      "model": "vis-google/gemini-3-flash-pre",
+      "ai_calls": 2,
+      "duration_seconds": 11.044,
+      "cost_rub": 2.03715
+    },
+    {
+      "page_number": 8,
+      "model": "vis-google/gemini-3-flash-pre",
+      "ai_calls": 2,
+      "duration_seconds": 11.595,
+      "cost_rub": 1.9806
+    },
+    {
+      "page_number": 9,
+      "model": "vis-google/gemini-3-flash-pre",
+      "ai_calls": 2,
+      "duration_seconds": 10.642,
+      "cost_rub": 1.53465
+    },
+    {
+      "page_number": 10,
+      "model": "vis-google/gemini-3-flash-pre",
+      "ai_calls": 2,
+      "duration_seconds": 16.767,
+      "cost_rub": 3.10155
+    }
+  ]
+}

@@ -2,9 +2,13 @@ import json, math, os, re
 from pathlib import Path
 import pymupdf
 
-PDF=Path("02_Изометрии_10_листов.pdf")
+PDF=Path(os.getenv("DIMENSION_PDF_PATH", "02_Изометрии_10_листов.pdf"))
 PAGE_INDEX=int(os.getenv("DIMENSION_PAGE_INDEX", "1"))
 PAGE_TAG=PAGE_INDEX+1
+OUTPUT_SUFFIX=os.getenv("DIMENSION_OUTPUT_SUFFIX", "")
+OUTPUT_DIR=Path(os.getenv("DIMENSION_PROBE_OUTPUT_DIR", "output/dimension_probe"))
+EXCLUDE_IDS={item for item in os.getenv("DIMENSION_EXCLUDE_IDS", "").split(",") if item}
+HIDE_CANDIDATE_LEADERS=os.getenv("DIMENSION_HIDE_CANDIDATE_LEADERS", "0") == "1"
 MAX_WIDTH_PT=.72; MIN_LENGTH_PT=20; ARROW_DISTANCE_PT=16
 BLUE_MIN_WIDTH_PT=.70
 BASE_ENDPOINT_ARROW_DISTANCE_PT=6
@@ -202,6 +206,8 @@ for drawing in page.get_drawings():
                 leader_candidates[key]=(total_score,candidate)
 
 matches.extend(item[1] for item in leader_candidates.values())
+if EXCLUDE_IDS:
+    matches=[item for item in matches if item["candidate_id"] not in EXCLUDE_IDS]
 
 def point_distance(a, b):
     return math.hypot(a[0]-b[0], a[1]-b[1])
@@ -236,15 +242,15 @@ for inner in matches:
 for item in matches:
     item.setdefault("nested",False)
 
-output_dir=Path("output")/"dimension_probe"
+output_dir=OUTPUT_DIR
 output_dir.mkdir(parents=True,exist_ok=True)
-out=output_dir/f"dimension_probe_page{PAGE_TAG}.json"
+out=output_dir/f"dimension_probe_page{PAGE_TAG}{OUTPUT_SUFFIX}.json"
 out.write_text(json.dumps(matches,ensure_ascii=False,indent=2),encoding="utf-8")
 for i,m in enumerate(matches,1):
     a,b=pymupdf.Point(*m["a"]),pymupdf.Point(*m["b"])
     color=(0.55,0.18,0.72) if m.get("nested") else (1,0,0)
     page.draw_line(a,b,color=color,width=1.4 if m.get("nested") else 1,overlay=True)
-    if m["mode"]=="leader":
+    if m["mode"]=="leader" and not HIDE_CANDIDATE_LEADERS:
         page.draw_line(pymupdf.Point(*m["leader_a"]),pymupdf.Point(*m["leader_b"]),color=(0,0.7,0),width=1,overlay=True)
     source_number=next((n for n in numbers if n["candidate_id"]==m["candidate_id"]),None)
     if source_number is not None:
@@ -256,5 +262,5 @@ for service in service_boxes:
     page.draw_rect(pymupdf.Rect(x0-2,y0-2,x1+2,y1+2),color=(0,0.35,1),width=1,overlay=True)
 for p,q in service_leaders:
     page.draw_line(p,q,color=(0,0.35,1),width=1,overlay=True)
-page.get_pixmap(matrix=pymupdf.Matrix(1.5,1.5),alpha=False).save(output_dir/f"dimension_probe_page{PAGE_TAG}.png")
+page.get_pixmap(matrix=pymupdf.Matrix(1.5,1.5),alpha=False).save(output_dir/f"dimension_probe_page{PAGE_TAG}{OUTPUT_SUFFIX}.png")
 print(f"saved {out}: {len(matches)} strict dimension lines")

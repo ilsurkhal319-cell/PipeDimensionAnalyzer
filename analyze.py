@@ -75,35 +75,26 @@ SYSTEM_PROMPT = """
 кандидаты и не исключай переданные C-ID как служебные. Твоя задача — определить только main/branch.
 
 Входные данные:
-- Геометрическая разметка уже отфильтровала служебные числа. Каждый переданный C-ID является
-  действительным линейным размером вдоль трассы и должен быть рассмотрен.
-- Красная линия показывает размерный отрезок, зелёная — выноску от числа к этому отрезку.
-  Зеленую выноску отдельно не складывай. Используй только переданные C-ID.
-- Поле dimension_line содержит нормализованные координаты концов красного размерного отрезка.
-  Используй их только для понимания, к какому участку относится размер.
+- Каждый переданный C-ID является действительным линейным размером вдоль трассы и должен быть рассмотрен.
+- Красная линия показывает размерный отрезок, зелёная — выноску. Используй только C-ID.
+- Поле dimension_line содержит координаты концов красного размерного отрезка.
 
 ОСНОВНЫЕ ПРАВИЛА:
-
-branch:
 Тройник или узел существует только там, где синяя стрелка заканчивается на пересечении
 реальных осевых линий труб. Другие места не анализируй.
-
 Синяя стрелка указывает на узел, а не на конкретный выход.
-
-Если в синем обозначении один X, в узле сходятся три осевых выхода:
-два продолжают main-трассу, один является branch.
-
-Если в синем обозначении два X, в узле сходятся четыре осевых выхода:
-две пары продолжают main-трассы, два оставшихся выхода являются branch.
-
-Определи main по непрерывному продолжению осевых линий через узел. Оставшиеся выходы
-назначь branch. Не выбирай роли по длине, углу или положению числа.
+При одном X в синей рамке!!!! три выхода: два main и один branch.
+При двух X в синей рамке!!!! четыре выхода: две пары main и два branch.
+Определи main по непрерывному продолжению осевых линий через узел. Остальные выходы branch.
 Если нет синей линии, указывающей на узел, branch начинаться не может.
 
-Для каждого кандидата верни candidate_id, segment_id, value_mm, role и included. У всех размеров
-Не вычисляй сумму: это сделает программа.
-При сомнении поставь status=review, перечисли его в ambiguities и всё равно верни лучший
-непротиворечивый вариант. Верни только структурированный объект без Markdown.
+ЖЁСТКО: близость к DN/X, одинаковое направление, совпадение DN или визуальное соседство
+не доказывают branch. C-ID может быть branch только при непрерывной осевой линии прямо от
+подтверждённого синего узла; разрыв, независимый фрагмент или другой узел запрещают branch.
+Если связь нельзя проследить однозначно, назначь main.
+
+Для каждого кандидата верни candidate_id, segment_id, value_mm, role и included.
+Не вычисляй сумму. Верни только структурированный объект без Markdown.
 """.strip()
 
 NESTED_PROMPT = """
@@ -410,6 +401,11 @@ def merge_nested_result(
         for item in nested.dimensions
         if item.role == "nested"
     }
+    present_ids = {item.candidate_id for item in topology.dimensions}
+    for item in nested.dimensions:
+        if item.candidate_id in nested_ids and item.candidate_id not in present_ids:
+            topology.dimensions.append(item.model_copy(deep=True))
+            present_ids.add(item.candidate_id)
     for item in topology.dimensions:
         if item.candidate_id in nested_ids:
             item.role = "nested"
@@ -631,6 +627,8 @@ def analyze(
     start_page: int = 1,
     expected_mm: int | None = None,
     nested_model: str | None = None,
+    nested_only: bool = False,
+    nested_results: Path | None = None,
 ) -> None:
     from openai import OpenAI
 
@@ -650,6 +648,12 @@ def analyze(
     rows: list[dict[str, object]] = []
     page_payloads: list[dict[str, object]] = []
     metrics_payloads: list[dict[str, object]] = []
+    cached_nested = {}
+    if nested_results:
+        cached_nested = {
+            int(item["page_number"]): PageInterpretation.model_validate(item["interpretation"])
+            for item in json.loads(nested_results.read_text(encoding="utf-8"))
+        }
 
     pages = list(document)
     for page_index, page in enumerate(pages):
@@ -658,10 +662,13 @@ def analyze(
         png = render_page(page, dpi=dpi)
         candidates = extract_numeric_candidates(page)
         marked_png = mark_candidates_on_image(png, candidates)
-        probe_script = Path("dimension_probe.py")
+        probe_script = Path(__file__).resolve().with_name("dimension_probe.py")
+        geometry_dir = output_dir / "dimension_probe"
         if probe_script.exists():
             probe_env = os.environ.copy()
             probe_env["DIMENSION_PAGE_INDEX"] = str(page_number - 1)
+            probe_env["DIMENSION_PDF_PATH"] = str(pdf_path.resolve())
+            probe_env["DIMENSION_PROBE_OUTPUT_DIR"] = str(geometry_dir.resolve())
             subprocess.run(
                 [sys.executable, str(probe_script)],
                 check=True,
@@ -670,9 +677,6 @@ def analyze(
                 text=True,
             )
         geometry_items: list[dict[str, object]] = []
-        geometry_dir = Path("output") / "dimension_probe"
-        if not geometry_dir.exists():
-            geometry_dir = Path("output")
         geometry_json = geometry_dir / f"dimension_probe_page{page_number}.json"
         geometry_png = geometry_dir / f"dimension_probe_page{page_number}.png"
         if geometry_json.exists() and geometry_png.exists():
@@ -706,18 +710,56 @@ def analyze(
         )
         candidate_page.insert_image(candidate_page.rect, stream=marked_png)
 
-        print(f"Page {page_number}/{len(pages)}: calling {model}")
-        result, proposal_metrics = interpret_page(
-            client, model, page_number, png, marked_png, candidates
-        )
+        nested_result = cached_nested.get(page_number)
         nested_metrics = None
-        if nested_model:
+        if nested_result is None and nested_model:
             print(f"Page {page_number}/{len(pages)}: checking nested dimensions with {nested_model}")
             nested_result, nested_metrics = interpret_page(
                 client, nested_model, page_number, png, marked_png, candidates,
                 system_prompt=NESTED_PROMPT,
             )
             attach_cost(nested_metrics, prefix="VSEGPT_NESTED")
+        nested_ids = {
+            str(item.candidate_id) for item in (nested_result.dimensions if nested_result else [])
+            if item.role == "nested" and item.candidate_id
+        }
+        branch_candidates = [c for c in candidates if str(c["candidate_id"]) not in nested_ids]
+        branch_marked_png = marked_png
+        if probe_script.exists():
+            branch_env = os.environ.copy()
+            branch_env["DIMENSION_PAGE_INDEX"] = str(page_number - 1)
+            branch_env["DIMENSION_PDF_PATH"] = str(pdf_path.resolve())
+            branch_env["DIMENSION_PROBE_OUTPUT_DIR"] = str(geometry_dir.resolve())
+            branch_env["DIMENSION_EXCLUDE_IDS"] = ",".join(sorted(nested_ids))
+            branch_env["DIMENSION_OUTPUT_SUFFIX"] = "_branch"
+            branch_env["DIMENSION_HIDE_CANDIDATE_LEADERS"] = "1"
+            subprocess.run(
+                [sys.executable, str(probe_script)], check=True, env=branch_env,
+                capture_output=True, text=True,
+            )
+            branch_png_path = geometry_dir / f"dimension_probe_page{page_number}_branch.png"
+            if branch_png_path.exists():
+                branch_marked_png = branch_png_path.read_bytes()
+                print(f"Page {page_number}: removed {len(nested_ids)} nested candidates from branch markup")
+
+        if nested_only:
+            result = PageInterpretation(
+                line_id=None,
+                dimensions=[Dimension(
+                    segment_id=None, candidate_id=str(c["candidate_id"]), label=None,
+                    value_mm=int(c["value_mm"]), role="main", included=True,
+                    bbox=NormalizedBox.model_validate(c["bbox"]),
+                    reason="Baseline geometry candidate; branch analysis disabled.",
+                ) for c in candidates],
+                status="ok", ambiguities=[],
+            )
+            proposal_metrics = {"model": "disabled", "input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "duration_seconds": 0}
+        else:
+            print(f"Page {page_number}/{len(pages)}: calling {model} with {len(branch_candidates)} non-nested candidates")
+            result, proposal_metrics = interpret_page(
+                client, model, page_number, png, branch_marked_png, branch_candidates
+            )
+        if nested_result is not None:
             result = merge_nested_result(result, nested_result, candidates)
         leader_ids = {
             item.get("candidate_id")
@@ -811,7 +853,10 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Calculate pipeline lengths from isometric PDF")
     parser.add_argument("pdf", type=Path)
     parser.add_argument("--output", type=Path, default=Path("output"))
-    parser.add_argument("--model", default=os.getenv("OPENAI_MODEL", "vis-openai/gpt-5-mini"))
+    parser.add_argument(
+        "--model",
+        default=os.getenv("OPENAI_MODEL", "vis-google/gemini-3-flash-pre"),
+    )
     parser.add_argument("--dpi", type=int, default=150)
     parser.add_argument("--max-pages", type=int, default=None)
     parser.add_argument("--start-page", type=int, default=1)
@@ -826,6 +871,9 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional separate vision model used only for nested dimensions",
     )
+    parser.add_argument("--nested-only", action="store_true", help="Disable topology model and test nested only")
+    parser.add_argument("--nested-results", type=Path, default=None,
+                        help="Reuse nested-only results.json and hide nested C-IDs from branch model")
     return parser.parse_args()
 
 
@@ -840,7 +888,9 @@ def main() -> None:
         args.review_model,
         args.start_page,
         args.expected_mm,
-        args.nested_model,
+        args.nested_model or (args.model if args.nested_only else None),
+        args.nested_only,
+        args.nested_results,
     )
 
 
