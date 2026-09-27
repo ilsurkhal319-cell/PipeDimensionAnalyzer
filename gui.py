@@ -115,7 +115,6 @@ class App(tk.Tk):
             pass
 
     def _write(self, text: str) -> None:
-        # Технический вывод намеренно не показывается в интерфейсе.
         pass
 
     def _show_result(self) -> None:
@@ -141,11 +140,7 @@ class App(tk.Tk):
                     if isinstance(metrics.get("cost_rub"), (int, float)):
                         request_cost += float(metrics["cost_rub"])
                         has_cost = True
-                    # Cached nested metrics belong to an earlier run. Show only
-                    # the duration of the branch request executed right now.
-                    if metrics_path == out / "metrics.json" and isinstance(
-                        metrics.get("duration_seconds"), (int, float)
-                    ):
+                    if isinstance(metrics.get("duration_seconds"), (int, float)):
                         request_duration += float(metrics["duration_seconds"])
                         has_duration = True
             if not has_cost:
@@ -212,7 +207,7 @@ class App(tk.Tk):
                 self.result_zoom = 1.0
                 self.zoom_var.set("100%")
                 self._render_result_image()
-        except Exception as exc:  # noqa: BLE001 - surface any rendering error in the GUI
+        except Exception as exc:
             self._write(f"Не удалось показать сводку: {exc}\n")
 
     def _run(self) -> None:
@@ -240,10 +235,7 @@ class App(tk.Tk):
                       "--output", self.output_var.get(), "--model", self.model_var.get(),
                       "--dpi", "150", "--start-page", str(start), "--max-pages", str(pages),
                       "--nested-results", f"{nested_output}/results.json"]
-        # If nested results already exist, reuse them and run only the branch stage.
-        # This avoids spending another request on the unchanged nested analysis.
-        nested_cache_file = ROOT / nested_output / "results.json"
-        commands = [branch_cmd] if nested_cache_file.exists() else [nested_cmd, branch_cmd]
+        commands = [nested_cmd, branch_cmd]
         self.run_button.configure(state="disabled")
         self.progress.start(10)
         threading.Thread(target=self._worker, args=(commands,), daemon=True).start()
@@ -262,7 +254,7 @@ class App(tk.Tk):
                     self.events.put("__ERROR__")
                     return
             self.events.put("__DONE__")
-        except Exception as exc:  # noqa: BLE001 - report any background worker failure
+        except Exception as exc:
             self.process_output.append(f"Ошибка запуска: {exc}\n")
             self.events.put("__ERROR__")
 

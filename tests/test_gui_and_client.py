@@ -86,7 +86,7 @@ def test_gui_zoom_updates_percentage_without_window() -> None:
     assert app.zoom_var.get() == "100%"
 
 
-def test_gui_reuses_nested_cache_and_starts_only_branch_command(monkeypatch, tmp_path) -> None:
+def test_gui_refreshes_nested_stage_even_when_cache_exists(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(gui, "ROOT", tmp_path)
     pdf = tmp_path / "drawing.pdf"
     pdf.write_bytes(b"%PDF")
@@ -116,8 +116,9 @@ def test_gui_reuses_nested_cache_and_starts_only_branch_command(monkeypatch, tmp
 
     assert app.output_var.get() == "output/page4"
     assert len(started) == 1
-    assert len(started[0]) == 1
-    assert "--nested-results" in started[0][0]
+    assert len(started[0]) == 2
+    assert "--nested-only" in started[0][0]
+    assert "--nested-results" in started[0][1]
 
 
 def test_gui_worker_queues_completion_without_subprocess(monkeypatch) -> None:

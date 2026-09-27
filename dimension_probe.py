@@ -47,7 +47,6 @@ for block in page.get_text("dict").get("blocks",[]):
                 numbers.append({"candidate_id":f"C{candidate_index}","text":text,"x":(x0+x1)/2,"y":(y0+y1)/2,
                                 "x0":x0,"y0":y0,"x1":x1,"y1":y1,"angle":ta})
 
-# Boxed integers are item / position labels, not linear dimensions.
 frame_rects=[]
 for drawing in page.get_drawings():
     for item in drawing.get("items",[]):
@@ -66,8 +65,6 @@ for d in page.get_drawings():
     r=d.get("rect")
     if d.get("type")=="f" and r and 2<=r.width<=20 and 2<=r.height<=20:
         arrows.append(((r.x0+r.x1)/2,(r.y0+r.y1)/2))
-        # A triangular filled path is an arrowhead.  The vertex opposite the
-        # shortest edge is its tip, so its direction can be recovered exactly.
         points=[]
         for item in d.get("items",[]):
             if item[0]=="l":
@@ -99,7 +96,6 @@ for service in service_boxes:
     best=None
     for drawing in page.get_drawings():
         width=float(drawing.get("width") or 0)
-        # PDF stores nominal 0.72 pt lines as 0.720000028... sometimes.
         if not BLUE_MIN_WIDTH_PT<=width<=MAX_WIDTH_PT+.02: continue
         for item in drawing.get("items",[]):
             if item[0]!="l": continue
@@ -162,7 +158,6 @@ for drawing in page.get_drawings():
                             "length":round(length,2),"angle":round(la,2),
                             "text_offset":round(best[2],2),"text_along":round(best[3],2)})
 
-# Separate rule for a remote value connected by a thin leader to an arrow cluster.
 leader_candidates={}
 for drawing in page.get_drawings():
     width=float(drawing.get("width") or 0)
@@ -186,9 +181,6 @@ for drawing in page.get_drawings():
                     if bi[0]!="l": continue
                     u,v=bi[1],bi[2]; base_length=math.hypot(v.x-u.x,v.y-u.y)
                     if not 8<=base_length<=120: continue
-                    # The target must be a real dimension segment: one distinct
-                    # arrowhead near each endpoint. This prevents a leader from
-                    # attaching to an arbitrary nearby construction line.
                     arrow_u=min((math.hypot(u.x-x,u.y-y),i) for i,(x,y) in enumerate(arrows))
                     arrow_v=min((math.hypot(v.x-x,v.y-y),i) for i,(x,y) in enumerate(arrows))
                     if (arrow_u[0]>BASE_ENDPOINT_ARROW_DISTANCE_PT or
@@ -225,9 +217,6 @@ def segment_contains(outer, inner):
     for x,y in inner:
         projections.append(((x-outer[0][0])*ax + (y-outer[0][1])*ay)/length_sq)
         cross.append(abs(ax*(y-outer[0][1])-ay*(x-outer[0][0]))/math.sqrt(length_sq))
-    # Dimension lines are often drawn parallel to the axis with a lateral
-    # offset. Allow that drafting offset while still requiring full projection
-    # containment along the outer segment.
     return max(cross) <= 24 and min(projections) >= -.10 and max(projections) <= 1.10
 
 auto_nested={}

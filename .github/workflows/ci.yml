@@ -18,6 +18,6 @@ jobs:
       - name: Check imports
         run: python -c "import openai, pydantic, pymupdf, PIL, tkinter"
       - name: Lint
-        run: ruff check analyze.py dimension_probe.py gui.py tests
+        run: ruff check analyze.py dimension_probe.py gui.py pipe_dimension tests
       - name: Test without API calls
         run: pytest -q
