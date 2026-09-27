@@ -270,7 +270,6 @@ def interpret_page(
     client: OpenAI,
     model: str,
     page_number: int,
-    original_png: bytes,
     marked_png: bytes,
     candidates: list[dict[str, object]],
     system_prompt: str = SYSTEM_PROMPT,
@@ -429,57 +428,6 @@ def merge_nested_result(
     return assign_display_labels(validate_dimensions(topology, candidates))
 
 
-def review_page(
-    client: OpenAI,
-    model: str,
-    page_number: int,
-    original_png: bytes,
-    marked_png: bytes,
-    candidates: list[dict[str, object]],
-    proposal: PageInterpretation,
-) -> tuple[PageInterpretation, dict[str, int | float | str | None]]:
-    started = time.perf_counter()
-    response = client.chat.completions.parse(
-        model=model,
-        messages=[
-            {"role": "system", "content": REVIEW_PROMPT},
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": (
-                            f"Проверь лист {page_number}. Кандидаты:\n"
-                            + json.dumps(candidates, ensure_ascii=False, separators=(",", ":"))
-                            + "\nПредварительный ответ:\n"
-                            + proposal.model_dump_json()
-                            + "\nЕдинственное изображение — полный чертёж с геометрической разметкой; используй его для проверки."
-                        ),
-                    },
-                    {"type": "image_url", "image_url": {"url": as_data_url(marked_png), "detail": "high"}},
-                ],
-            },
-        ],
-        response_format=PageInterpretation,
-        reasoning_effort="low",
-        temperature=0,
-        max_tokens=8192,
-    )
-    elapsed = time.perf_counter() - started
-    result = response.choices[0].message.parsed
-    if result is None:
-        raise RuntimeError("The review model did not return a parsed PageInterpretation")
-    result = assign_display_labels(validate_dimensions(result, candidates))
-    usage = response.usage
-    return result, {
-        "model": model,
-        "duration_seconds": round(elapsed, 3),
-        "input_tokens": usage.prompt_tokens if usage else None,
-        "output_tokens": usage.completion_tokens if usage else None,
-        "total_tokens": usage.total_tokens if usage else None,
-    }
-
-
 def combine_stage_metrics(
     proposal: dict[str, int | float | str | None],
     review: dict[str, int | float | str | None] | None,
@@ -623,7 +571,6 @@ def analyze(
     model: str,
     dpi: int,
     max_pages: int | None = None,
-    review_model: str | None = None,
     start_page: int = 1,
     expected_mm: int | None = None,
     nested_model: str | None = None,
@@ -715,7 +662,7 @@ def analyze(
         if nested_result is None and nested_model:
             print(f"Page {page_number}/{len(pages)}: checking nested dimensions with {nested_model}")
             nested_result, nested_metrics = interpret_page(
-                client, nested_model, page_number, png, marked_png, candidates,
+                client, nested_model, page_number, marked_png, candidates,
                 system_prompt=NESTED_PROMPT,
             )
             attach_cost(nested_metrics, prefix="VSEGPT_NESTED")
@@ -757,7 +704,7 @@ def analyze(
         else:
             print(f"Page {page_number}/{len(pages)}: calling {model} with {len(branch_candidates)} non-nested candidates")
             result, proposal_metrics = interpret_page(
-                client, model, page_number, png, branch_marked_png, branch_candidates
+                client, model, page_number, branch_marked_png, branch_candidates
             )
         if nested_result is not None:
             result = merge_nested_result(result, nested_result, candidates)
@@ -778,18 +725,10 @@ def analyze(
                 else:
                     dimension.reason = dimension.reason.rstrip(".") + "; geometry markup confirms the dimension line"
         attach_cost(proposal_metrics)
-        review_metrics = None
-        review_all = os.getenv("OPENAI_REVIEW_ALL", "0").lower() in {"1", "true", "yes"}
-        if review_model and (review_all or result.status == "review"):
-            print(f"Page {page_number}/{len(pages)}: reviewing with {review_model}")
-            result, review_metrics = review_page(
-                client, review_model, page_number, png, marked_png, candidates, result
-            )
-            attach_cost(review_metrics, prefix="VSEGPT_REVIEW")
-        # Final roles may be changed by geometry correction or review; labels must
-        # be assigned only after all role decisions are complete.
+        # Final roles may be changed by geometry correction; labels must be
+        # assigned only after all role decisions are complete.
         result = assign_display_labels(result)
-        metrics = combine_stage_metrics(proposal_metrics, review_metrics)
+        metrics = combine_stage_metrics(proposal_metrics, None)
         if nested_metrics is not None:
             metrics = combine_stage_metrics(metrics, nested_metrics)
 
@@ -862,11 +801,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--start-page", type=int, default=1)
     parser.add_argument("--expected-mm", type=int, default=None)
     parser.add_argument(
-        "--review-model",
-        default=os.getenv("OPENAI_REVIEW_MODEL"),
-        help="Optional second model that verifies and corrects the first answer",
-    )
-    parser.add_argument(
         "--nested-model",
         default=None,
         help="Optional separate vision model used only for nested dimensions",
@@ -885,7 +819,6 @@ def main() -> None:
         args.model,
         args.dpi,
         args.max_pages,
-        args.review_model,
         args.start_page,
         args.expected_mm,
         args.nested_model or (args.model if args.nested_only else None),

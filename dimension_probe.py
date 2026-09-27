@@ -1,5 +1,9 @@
-import json, math, os, re
+import json
+import math
+import os
+import re
 from pathlib import Path
+
 import pymupdf
 
 PDF=Path(os.getenv("DIMENSION_PDF_PATH", "02_Изометрии_10_листов.pdf"))
@@ -102,7 +106,7 @@ for service in service_boxes:
             p,q=item[1],item[2]
             length=math.hypot(q.x-p.x,q.y-p.y)
             if not 8<=length<=120: continue
-            def rect_distance(x,y):
+            def rect_distance(x, y, x0=x0, y0=y0, x1=x1, y1=y1):
                 dx=max(x0-x,0,x-x1); dy=max(y0-y,0,y-y1)
                 return math.hypot(dx,dy)
             dp=rect_distance(p.x,p.y); dq=rect_distance(q.x,q.y)

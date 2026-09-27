@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-import queue
 import json
+import queue
 import subprocess
 import sys
 import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
-from PIL import Image, ImageTk
-import pymupdf
 
+import pymupdf
+from PIL import Image, ImageTk
 
 ROOT = Path(__file__).resolve().parent
 
@@ -212,7 +212,7 @@ class App(tk.Tk):
                 self.result_zoom = 1.0
                 self.zoom_var.set("100%")
                 self._render_result_image()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - surface any rendering error in the GUI
             self._write(f"Не удалось показать сводку: {exc}\n")
 
     def _run(self) -> None:
@@ -262,7 +262,7 @@ class App(tk.Tk):
                     self.events.put("__ERROR__")
                     return
             self.events.put("__DONE__")
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - report any background worker failure
             self.process_output.append(f"Ошибка запуска: {exc}\n")
             self.events.put("__ERROR__")
 
